@@ -51,7 +51,6 @@ export const TOUCHPAD_W = 1920;
 export const TOUCHPAD_H = 942;
 
 const STICK_MAX = 32767;
-const DEADZONE = 0.1;
 
 /**
  * Keyboard map, also rendered by the help overlay. code → action.
@@ -92,9 +91,9 @@ export const KEY_HELP_EXTRA = [
   { keys: 'Esc', label: 'Stream menu' },
 ];
 
-/** @param {number} v -1..1 → i16, with per-axis deadzone. */
+/** @param {number} v -1..1 → i16 (linear passthrough — no deadzone, no
+ *  anti-deadzone; the console applies its own deadzone). */
 function axisToI16(v) {
-  if (Math.abs(v) < DEADZONE) return 0;
   const s = Math.round(v * STICK_MAX);
   return Math.max(-STICK_MAX, Math.min(STICK_MAX, s));
 }
