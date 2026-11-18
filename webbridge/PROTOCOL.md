@@ -21,14 +21,23 @@ must build the WS URL by substituting the port segment in its own URL
 - `GET /api/info` → `{ "name", "version", "wsPort": 9081 }`
 - `GET /api/hosts` → `[ { "host", "nickname", "mac", "ps5": bool,
   "state": "ready"|"standby"|"unknown", "discovered": bool,
-  "registered": bool, "appName": string|null } ]`
+  "registered": bool, "loginPinSet": bool, "appName": string|null } ]`
   (union of discovery results and registered consoles from config)
 - `POST /api/wakeup` `{ "host" }` → `204` (console must be registered)
 - `POST /api/register` `{ "host", "ps5": bool, "pin": number,
-  "psnAccountId": base64 string }` → `200 { "nickname" }` on success,
-  `4xx/5xx { "error" }` on failure. Blocking (runs chiaki_regist).
+  "psnAccountId": base64 string, "loginPin"?: string }` → `200 { "nickname" }`
+  on success, `4xx/5xx { "error" }` on failure. Blocking (runs chiaki_regist).
+  Optional `loginPin` (4-8 digits) is stored as below; re-registering without
+  it keeps a previously stored one.
+- `POST /api/login-pin` `{ "host", "loginPin": string }` → `204`; `""` clears.
+  `404` if the console isn't registered. Per-console login PIN (the console
+  user's passcode, chiaki-ng's "Console PIN"), stored in config.json and
+  never returned by the API (only `loginPinSet`). When the console asks for
+  it, the bridge answers the first request itself; it only sends
+  `pinRequest` to the browser if no PIN is stored or the console rejects it.
 - `GET /api/config` → sanitized config (no keys), includes
-  `{ "psnAccountIdSet": bool, "consoles": [...] }`
+  `{ "psnAccountIdSet": bool, "consoles": [{ "host", "nickname", "ps5",
+  "loginPinSet" }] }`
 
 ## Signaling (WebSocket, JSON text messages)
 
@@ -149,12 +158,16 @@ Browser → bridge:
 - Motion (optional): `{ "t": "mo", "gx","gy","gz","ax","ay","az",
   "ox","oy","oz","ow" }` (gyro rad/s, accel g, orientation quaternion)
 - `{ "t": "idr" }` — request recovery keyframe
-- `{ "t": "pin", "pin": "1234" }` — login PIN reply
+- `{ "t": "pin", "pin": "1234" }` — login PIN reply (the browser holds it
+  until the input DC is open)
 
 Bridge → browser:
 
 - `{ "t": "rumble", "l": 0-255, "r": 0-255 }`
 - `{ "t": "led", "r", "g", "b" }`
-- `{ "t": "pinRequest", "incorrect": bool }` — show PIN dialog
+- `{ "t": "pinRequest", "incorrect": bool, "savedPinRejected": bool }` —
+  show PIN dialog (`savedPinRejected`: the stored PIN was sent and refused).
+  Bridge → browser events raised before the input DC opens (the PIN request
+  usually is) are queued and delivered on open.
 - `{ "t": "nickname", "name" }`
 - `{ "t": "stats", ... }` (periodic, informational)

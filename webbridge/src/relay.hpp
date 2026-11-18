@@ -94,6 +94,10 @@ private:
 	// pending keyframe if the video DC wasn't open yet
 	std::mutex pending_mutex;
 	std::vector<uint8_t> pending_keyframe;
+	// bridge -> browser input-DC events sent before that DC opened (e.g. the
+	// console's login PIN request, which arrives while ICE is still settling)
+	std::vector<std::string> pending_input;
+	void flush_pending_input(const std::shared_ptr<rtc::DataChannel> &dc);
 
 	std::mutex queue_mutex;
 	std::condition_variable queue_cv;

@@ -228,6 +228,11 @@ void Relay::setup()
 			if(std::holds_alternative<std::string>(msg) && cbs.input_json)
 				cbs.input_json(std::get<std::string>(msg));
 		});
+		std::weak_ptr<rtc::DataChannel> weak_input = input_dc;
+		input_dc->onOpen([this, weak_input]() {
+			if(auto dc = weak_input.lock())
+				flush_pending_input(dc);
+		});
 	}
 
 	// --- Mic DC (browser -> bridge): raw 48 kHz mono s16le PCM chunks.
@@ -320,6 +325,8 @@ void Relay::close()
 	connected_ = false;
 	if(video_dc)
 		video_dc->onOpen(nullptr);
+	if(input_dc)
+		input_dc->onOpen(nullptr);
 	if(input_dc)
 		input_dc->onMessage(nullptr);
 	if(mic_dc)
@@ -477,6 +484,25 @@ void Relay::send_job(const Job &job)
 	}
 }
 
+void Relay::flush_pending_input(const std::shared_ptr<rtc::DataChannel> &dc)
+{
+	std::vector<std::string> msgs;
+	{
+		std::lock_guard<std::mutex> lock(pending_mutex);
+		msgs.swap(pending_input);
+	}
+	for(const auto &m : msgs)
+	{
+		try
+		{
+			dc->send(m);
+		}
+		catch(const std::exception &)
+		{
+		}
+	}
+}
+
 void Relay::send_input_json(const std::string &s)
 {
 	std::shared_ptr<rtc::DataChannel> dc;
@@ -485,7 +511,18 @@ void Relay::send_input_json(const std::string &s)
 		dc = input_dc;
 	}
 	if(!dc || !dc->isOpen())
+	{
+		// Hold it for the channel's onOpen (bounded: stale rumble is harmless,
+		// a lost login PIN request stalls the session).
+		{
+			std::lock_guard<std::mutex> lock(pending_mutex);
+			if(pending_input.size() < 32)
+				pending_input.push_back(s);
+		}
+		if(dc && dc->isOpen()) // opened meanwhile: onOpen may have run already
+			flush_pending_input(dc);
 		return;
+	}
 	try
 	{
 		dc->send(s);

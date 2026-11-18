@@ -104,6 +104,12 @@ void ChiakiSource::stop()
 		chiaki_session_stop(&session);
 		chiaki_session_join(&session);
 	}
+	{
+		// session thread is gone, so a pending set_login_pin can finish
+		std::lock_guard<std::mutex> lock(login_pin_mutex);
+		if(login_pin_thread.joinable())
+			login_pin_thread.join();
+	}
 	if(opus_encoder_inited)
 	{
 		std::lock_guard<std::mutex> lock(mic_mutex);
@@ -115,6 +121,21 @@ void ChiakiSource::stop()
 		chiaki_session_fini(&session);
 		session_inited = false;
 	}
+}
+
+void ChiakiSource::send_login_pin_async(std::string pin)
+{
+	// libchiaki delivers CHIAKI_EVENT_LOGIN_PIN_REQUEST with the session's
+	// state mutex held, and chiaki_session_set_login_pin takes that mutex, so
+	// the answer has to come from another thread (chiaki-ng answers from its
+	// UI thread).
+	std::lock_guard<std::mutex> lock(login_pin_mutex);
+	if(login_pin_thread.joinable())
+		return; // at most one automatic answer per session
+	login_pin_auto_sent = true;
+	login_pin_thread = std::thread([this, pin = std::move(pin)]() {
+		chiaki_session_set_login_pin(&session, (const uint8_t *)pin.data(), pin.size());
+	});
 }
 
 void ChiakiSource::request_idr()
@@ -203,8 +224,24 @@ void ChiakiSource::event_cb(ChiakiEvent *event, void *user)
 			send({{"t", "led"}, {"r", event->led_state[0]}, {"g", event->led_state[1]}, {"b", event->led_state[2]}});
 			break;
 		case CHIAKI_EVENT_LOGIN_PIN_REQUEST:
-			send({{"t", "pinRequest"}, {"incorrect", event->login_pin_request.pin_incorrect}});
+		{
+			const bool incorrect = event->login_pin_request.pin_incorrect;
+			// Same rule as chiaki-ng: answer the first request with the stored
+			// PIN; if there is none, or the console rejects it, ask the browser.
+			if(!incorrect && !self->console.login_pin.empty())
+			{
+				CHIAKI_LOGI(bridge_log(), "webbridge: console requested login PIN, sending stored PIN");
+				self->send_login_pin_async(self->console.login_pin);
+				break;
+			}
+			const bool saved_rejected = incorrect && self->login_pin_auto_sent.exchange(false);
+			if(saved_rejected)
+				CHIAKI_LOGW(bridge_log(), "webbridge: console rejected the stored login PIN, asking the browser");
+			else
+				CHIAKI_LOGI(bridge_log(), "webbridge: console requested login PIN, asking the browser");
+			send({{"t", "pinRequest"}, {"incorrect", incorrect}, {"savedPinRejected", saved_rejected}});
 			break;
+		}
 		case CHIAKI_EVENT_NICKNAME_RECEIVED:
 			send({{"t", "nickname"}, {"name", std::string(event->server_nickname, strnlen(event->server_nickname, sizeof(event->server_nickname)))}});
 			break;

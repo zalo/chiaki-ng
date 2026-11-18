@@ -166,6 +166,17 @@ function hostCard(h) {
   });
   actions.appendChild(wakeBtn);
 
+  if (h.registered) {
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'btn';
+    pinBtn.textContent = h.loginPinSet ? 'Login PIN ✓' : 'Login PIN';
+    pinBtn.title = h.loginPinSet
+      ? 'A login PIN is saved and sent automatically'
+      : "Save the console user's login PIN";
+    pinBtn.addEventListener('click', () => openLoginPinDialog(h));
+    actions.appendChild(pinBtn);
+  }
+
   const regBtn = document.createElement('button');
   regBtn.className = 'btn';
   regBtn.textContent = h.registered ? 'Re-register' : 'Register';
@@ -176,6 +187,56 @@ function hostCard(h) {
   return card;
 }
 
+/* ───────────────────────────── login PIN ─────────────────────────────── */
+
+/** Store (or clear, with '') the PIN the bridge answers login requests with. */
+async function saveLoginPin(host, loginPin) {
+  const res = await api('api/login-pin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host, loginPin }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'HTTP ' + res.status);
+  }
+}
+
+/** @param {object} h — /api/hosts entry */
+function openLoginPinDialog(h) {
+  const name = h.nickname || h.host;
+  $('lp-msg').textContent = (h.loginPinSet ? 'A login PIN is saved for ' : 'No login PIN is saved for ') +
+    name + ". The bridge sends it automatically when the console asks for the user's passcode.";
+  $('lp-input').value = '';
+  $('lp-error').textContent = '';
+  $('lp-clear').disabled = !h.loginPinSet;
+  const close = openModal($('modal-loginpin'));
+  const submit = async (pin) => {
+    try {
+      await saveLoginPin(h.host, pin);
+      toast((pin ? 'Login PIN saved for ' : 'Login PIN cleared for ') + name);
+      close();
+      refreshHosts();
+    } catch (e) {
+      $('lp-error').textContent = 'Could not save: ' + e.message;
+    }
+  };
+  $('lp-cancel').onclick = close;
+  $('lp-clear').onclick = () => submit('');
+  $('lp-save').onclick = () => {
+    const pin = $('lp-input').value.trim();
+    if (!/^\d{4,8}$/.test(pin)) {
+      $('lp-error').textContent = 'Enter the 4–8 digit PIN.';
+      return;
+    }
+    submit(pin);
+  };
+  $('lp-input').onkeydown = (e) => {
+    if (e.key === 'Enter') $('lp-save').click();
+  };
+  $('lp-input').focus();
+}
+
 /* ───────────────────────────── registration ──────────────────────────── */
 
 /** @param {string} [host] @param {boolean} [ps5] */
@@ -183,6 +244,7 @@ function openRegisterDialog(host, ps5 = true) {
   $('reg-host').value = host || '';
   $('reg-ps5').checked = ps5;
   $('reg-pin').value = '';
+  $('reg-loginpin').value = '';
   $('reg-error').textContent = '';
   const close = openModal($('modal-register'));
   $('reg-cancel').onclick = close;
@@ -197,6 +259,12 @@ function openRegisterDialog(host, ps5 = true) {
       $('reg-error').textContent = 'Host, PIN and PSN Account ID are all required.';
       return;
     }
+    const loginPin = $('reg-loginpin').value.trim();
+    if (loginPin && !/^\d{4,8}$/.test(loginPin)) {
+      $('reg-error').textContent = 'Login PIN must be 4–8 digits (or leave it empty).';
+      return;
+    }
+    if (loginPin) body.loginPin = loginPin;
     $('reg-submit').disabled = true;
     $('reg-error').textContent = 'Registering… (this can take a few seconds)';
     try {
@@ -321,8 +389,11 @@ class ActiveSession {
     $('view-stream').addEventListener('pointerdown', this._onFsGesture);
 
     // Immersive mode: best-effort, silently tolerated failures (iOS).
+    // Fullscreen the whole document, not #view-stream: only the fullscreen
+    // element's subtree is rendered, so the modals (login PIN, menu, help)
+    // would otherwise be hidden behind the stream.
     try {
-      await $('view-stream').requestFullscreen({ navigationUI: 'hide' });
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
     } catch (e) {
       /* not available / denied */
     }
@@ -482,7 +553,7 @@ class ActiveSession {
         this.input.rumble(msg);
         break;
       case 'pinRequest':
-        this._showPinDialog(!!msg.incorrect);
+        this._showPinDialog(!!msg.incorrect, !!msg.savedPinRejected);
         break;
       case 'nickname':
         this.hud.setNickname(msg.name || '');
@@ -495,14 +566,22 @@ class ActiveSession {
     }
   }
 
-  _showPinDialog(incorrect) {
+  _showPinDialog(incorrect, savedRejected = false) {
     if (this.closePin) this.closePin();
-    $('pin-msg').textContent = incorrect
-      ? 'Incorrect PIN — try again.'
-      : 'The console is asking for a login PIN.';
+    $('pin-msg').textContent = savedRejected
+      ? 'The console rejected the saved login PIN. Enter the current one.'
+      : incorrect
+        ? 'Incorrect PIN — try again.'
+        : 'The console is asking for a login PIN.';
     $('pin-input').value = '';
+    // Only a registered console (not Demo) has somewhere to store the PIN.
+    const host = this.target.host || '';
+    $('pin-save-row').classList.toggle('hidden', !host);
     this.closePin = openModal($('modal-pin'), { sticky: true });
     $('pin-input').focus();
+    $('pin-input').onkeydown = (e) => {
+      if (e.key === 'Enter') $('pin-submit').click();
+    };
     $('pin-submit').onclick = () => {
       const pin = $('pin-input').value.trim();
       if (!/^\d{4,8}$/.test(pin)) {
@@ -510,6 +589,11 @@ class ActiveSession {
         return;
       }
       this.rtc.sendInput({ t: 'pin', pin });
+      if (host && $('pin-save').checked) {
+        saveLoginPin(host, pin)
+          .then(() => toast('Login PIN saved, it will be sent automatically next time'))
+          .catch((e) => toast('Could not save the login PIN: ' + e.message, 'error'));
+      }
       this.closePin();
       this.closePin = null;
     };
@@ -570,7 +654,7 @@ class ActiveSession {
     $('menu-fullscreen').onclick = async () => {
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
-        else await $('view-stream').requestFullscreen({ navigationUI: 'hide' });
+        else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
       } catch (e) {
         /* unsupported */
       }

@@ -21,7 +21,14 @@ struct ConsoleConfig
 	std::array<uint8_t, 16> regist_key{};
 	// "morning" / RP key
 	std::array<uint8_t, 16> rp_key{};
+	// PS5/PS4 user login passcode, sent automatically when the console asks
+	// for it (like chiaki-ng's per-console "Console PIN"). Empty = ask the
+	// browser every time.
+	std::string login_pin;
 };
+
+// 4-8 ASCII digits (the console's user passcode).
+bool is_valid_login_pin(const std::string &pin);
 
 class Config
 {
@@ -37,6 +44,9 @@ public:
 
 	const ConsoleConfig *find_console(const std::string &host) const;
 	void upsert_console(const ConsoleConfig &c);
+	// Store (or clear, with an empty pin) the login PIN for a registered
+	// console and persist it. Returns false if no console has that host.
+	bool set_login_pin(const std::string &host, const std::string &pin);
 
 	nlohmann::json sanitized() const;
 

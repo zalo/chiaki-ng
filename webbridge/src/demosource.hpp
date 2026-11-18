@@ -32,4 +32,8 @@ private:
 	FILE *ffmpeg = nullptr;
 	std::thread video_thread;
 	std::thread audio_thread;
+
+	// CHIAKI_DEMO_LOGIN_PIN: simulate a console asking for a login PIN, so the
+	// browser's PIN dialog can be tested without a passcode-locked console.
+	std::string demo_login_pin;
 };

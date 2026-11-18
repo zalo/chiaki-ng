@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <thread>
 
 // Runs a real Remote Play session against a registered console and adapts
 // libchiaki's callbacks to the SourceSink interface.
@@ -51,6 +52,12 @@ private:
 	ChiakiControllerState controller_state{};
 
 	void set_mic_enabled(bool enabled);
+
+	// stored login PIN, answered automatically on the first request
+	void send_login_pin_async(std::string pin);
+	std::mutex login_pin_mutex;
+	std::thread login_pin_thread;
+	std::atomic<bool> login_pin_auto_sent{false};
 
 	// microphone: browser PCM -> lib Opus encoder -> audio sender
 	ChiakiOpusEncoder opus_encoder{};

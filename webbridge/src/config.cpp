@@ -13,6 +13,16 @@
 using nlohmann::json;
 namespace fs = std::filesystem;
 
+bool is_valid_login_pin(const std::string &pin)
+{
+	if(pin.size() < 4 || pin.size() > 8)
+		return false;
+	for(char c : pin)
+		if(c < '0' || c > '9')
+			return false;
+	return true;
+}
+
 static std::string default_config_path()
 {
 	const char *xdg = std::getenv("XDG_CONFIG_HOME");
@@ -109,6 +119,12 @@ void Config::load()
 		c.host = jc.value("host", "");
 		c.nickname = jc.value("nickname", "");
 		c.ps5 = jc.value("ps5", true);
+		c.login_pin = jc.value("loginPin", "");
+		if(!c.login_pin.empty() && !is_valid_login_pin(c.login_pin))
+		{
+			CHIAKI_LOGW(bridge_log(), "webbridge: ignoring invalid loginPin for %s in config", c.host.c_str());
+			c.login_pin.clear();
+		}
 		if(c.host.empty()
 			|| !hex_decode(jc.value("registKey", ""), c.regist_key.data(), c.regist_key.size())
 			|| !hex_decode(jc.value("rpKey", ""), c.rp_key.data(), c.rp_key.size()))
@@ -134,13 +150,16 @@ void Config::save()
 	j["consoles"] = json::array();
 	for(const auto &c : consoles)
 	{
-		j["consoles"].push_back({
+		json jc = {
 			{"host", c.host},
 			{"nickname", c.nickname},
 			{"ps5", c.ps5},
 			{"registKey", hex_encode(c.regist_key.data(), c.regist_key.size())},
 			{"rpKey", hex_encode(c.rp_key.data(), c.rp_key.size())},
-		});
+		};
+		if(!c.login_pin.empty())
+			jc["loginPin"] = c.login_pin;
+		j["consoles"].push_back(std::move(jc));
 	}
 	std::error_code ec;
 	fs::create_directories(fs::path(path).parent_path(), ec);
@@ -170,7 +189,10 @@ void Config::upsert_console(const ConsoleConfig &nc)
 			// Same console re-registered (match by nickname) or same address
 			if(c.host == nc.host || (!nc.nickname.empty() && c.nickname == nc.nickname))
 			{
+				// re-registering keeps a stored login PIN unless a new one is given
+				std::string keep_pin = nc.login_pin.empty() ? c.login_pin : nc.login_pin;
 				c = nc;
+				c.login_pin = keep_pin;
 				found = true;
 				break;
 			}
@@ -181,12 +203,33 @@ void Config::upsert_console(const ConsoleConfig &nc)
 	save();
 }
 
+bool Config::set_login_pin(const std::string &host, const std::string &pin)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		bool found = false;
+		for(auto &c : consoles)
+		{
+			if(c.host == host)
+			{
+				c.login_pin = pin;
+				found = true;
+				break;
+			}
+		}
+		if(!found)
+			return false;
+	}
+	save();
+	return true;
+}
+
 nlohmann::json Config::sanitized() const
 {
 	json j;
 	j["psnAccountIdSet"] = psn_account_id_set;
 	j["consoles"] = json::array();
 	for(const auto &c : consoles)
-		j["consoles"].push_back({{"host", c.host}, {"nickname", c.nickname}, {"ps5", c.ps5}});
+		j["consoles"].push_back({{"host", c.host}, {"nickname", c.nickname}, {"ps5", c.ps5}, {"loginPinSet", !c.login_pin.empty()}});
 	return j;
 }

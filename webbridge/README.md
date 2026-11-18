@@ -54,9 +54,17 @@ First-time setup, all from the web UI:
 
 Config (registration keys) is stored in `~/.config/chiaki-web/config.json`.
 
+**Login PIN**: if the console user has a passcode, save it once with the
+"Login PIN" button on the console card (or the optional field when
+registering). The bridge then answers the console's PIN request itself, like
+chiaki-ng's per-console "Console PIN". Without one (or if the console rejects
+it) the browser shows a PIN dialog, with an option to remember the PIN.
+
 **Demo mode**: the "Demo" button streams an ffmpeg test pattern + Opus test
 tone through the full pipeline without a console — useful to validate a
-browser/network before touching real hardware.
+browser/network before touching real hardware. Set
+`CHIAKI_DEMO_LOGIN_PIN=1234` to make Demo simulate a console asking for a
+login PIN (to test the PIN dialog).
 
 ## Exposing publicly (Cloudflare Tunnel)
 

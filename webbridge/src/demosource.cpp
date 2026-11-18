@@ -4,6 +4,7 @@
 #include "log.hpp"
 #include "nalparse.hpp"
 
+#include <nlohmann/json.hpp>
 #include <opus/opus.h>
 
 #include <poll.h>
@@ -11,6 +12,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -47,6 +49,14 @@ bool DemoSource::start(SourceSink sink_, std::string &error)
 	video_thread = std::thread([this] { video_loop(); });
 	audio_thread = std::thread([this] { audio_loop(); });
 	CHIAKI_LOGI(bridge_log(), "webbridge: demo source started (%ux%u@%u)", profile.width, profile.height, profile.fps);
+
+	if(const char *p = std::getenv("CHIAKI_DEMO_LOGIN_PIN"); p && *p)
+	{
+		demo_login_pin = p;
+		CHIAKI_LOGI(bridge_log(), "webbridge: demo: simulating a login PIN request");
+		if(sink.event) // held by the transport until the input DC opens
+			sink.event(nlohmann::json{{"t", "pinRequest"}, {"incorrect", false}, {"savedPinRejected", false}}.dump());
+	}
 	return true;
 }
 
@@ -77,6 +87,23 @@ void DemoSource::handle_input(const std::string &json)
 	static std::atomic<bool> logged{false};
 	if(!logged.exchange(true))
 		CHIAKI_LOGI(bridge_log(), "webbridge: input DC delivering (first message: %.100s)", json.c_str());
+
+	if(demo_login_pin.empty())
+		return;
+	auto j = nlohmann::json::parse(json, nullptr, false);
+	if(!j.is_object() || j.value("t", "") != "pin")
+		return;
+	if(j.value("pin", "") == demo_login_pin)
+	{
+		CHIAKI_LOGI(bridge_log(), "webbridge: demo: login PIN accepted");
+		demo_login_pin.clear();
+	}
+	else
+	{
+		CHIAKI_LOGI(bridge_log(), "webbridge: demo: login PIN incorrect, asking again");
+		if(sink.event)
+			sink.event(nlohmann::json{{"t", "pinRequest"}, {"incorrect", true}, {"savedPinRejected", false}}.dump());
+	}
 }
 
 // Scan for an Access Unit Delimiter NAL (type 9) start; AUs run AUD→AUD.

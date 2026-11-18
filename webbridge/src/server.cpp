@@ -225,9 +225,13 @@ void BridgeServer::setup_rest()
 		for(const auto &d : discovered)
 		{
 			bool registered = false;
+			bool login_pin_set = false;
 			for(const auto &c : config.consoles)
 				if(c.host == d.host_addr)
+				{
 					registered = true;
+					login_pin_set = !c.login_pin.empty();
+				}
 			out.push_back({
 				{"host", d.host_addr},
 				{"nickname", d.host_name},
@@ -236,6 +240,7 @@ void BridgeServer::setup_rest()
 				{"state", d.ready ? "ready" : (d.standby ? "standby" : "unknown")},
 				{"discovered", true},
 				{"registered", registered},
+				{"loginPinSet", login_pin_set},
 				{"appName", d.app_name.empty() ? json(nullptr) : json(d.app_name)},
 			});
 		}
@@ -255,6 +260,7 @@ void BridgeServer::setup_rest()
 				{"state", "unknown"},
 				{"discovered", false},
 				{"registered", true},
+				{"loginPinSet", !c.login_pin.empty()},
 				{"appName", nullptr},
 			});
 		}
@@ -322,6 +328,14 @@ void BridgeServer::setup_rest()
 			return;
 		}
 
+		std::string login_pin = j.contains("loginPin") && j["loginPin"].is_string() ? j["loginPin"].get<std::string>() : "";
+		if(!login_pin.empty() && !is_valid_login_pin(login_pin))
+		{
+			res.status = 400;
+			res.set_content(json{{"error", "loginPin must be 4-8 digits"}}.dump(), "application/json");
+			return;
+		}
+
 		uint32_t pin = j["pin"].is_number() ? j["pin"].get<uint32_t>() : (uint32_t)strtoul(j["pin"].get<std::string>().c_str(), nullptr, 10);
 		ConsoleConfig console;
 		std::string error;
@@ -331,8 +345,40 @@ void BridgeServer::setup_rest()
 			res.set_content(json{{"error", error}}.dump(), "application/json");
 			return;
 		}
+		console.login_pin = login_pin;
 		config.upsert_console(console);
 		res.set_content(json{{"nickname", console.nickname}}.dump(), "application/json");
+	});
+
+	// Store or clear the login PIN the bridge answers with when the console
+	// asks for the user's passcode. Body: {"host", "loginPin"}; "" clears it.
+	http->Post("/api/login-pin", [this](const httplib::Request &req, httplib::Response &res) {
+		if(reject_unauthorized(req, res))
+			return;
+		json j = json::parse(req.body, nullptr, false);
+		if(!j.is_object() || !j.contains("host") || !j["host"].is_string()
+			|| !j.contains("loginPin") || !j["loginPin"].is_string())
+		{
+			res.status = 400;
+			res.set_content(json{{"error", "host and loginPin required"}}.dump(), "application/json");
+			return;
+		}
+		std::string host = j["host"];
+		std::string login_pin = j["loginPin"];
+		if(!login_pin.empty() && !is_valid_login_pin(login_pin))
+		{
+			res.status = 400;
+			res.set_content(json{{"error", "loginPin must be 4-8 digits"}}.dump(), "application/json");
+			return;
+		}
+		if(!config.set_login_pin(host, login_pin))
+		{
+			res.status = 404;
+			res.set_content(json{{"error", "console not registered"}}.dump(), "application/json");
+			return;
+		}
+		CHIAKI_LOGI(bridge_log(), "webbridge: login PIN %s for %s", login_pin.empty() ? "cleared" : "stored", host.c_str());
+		res.status = 204;
 	});
 
 	http->Get("/api/config", [this](const httplib::Request &req, httplib::Response &res) {

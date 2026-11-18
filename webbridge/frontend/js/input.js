@@ -185,6 +185,9 @@ export class InputManager {
 
   _keyDown(e) {
     this.onUserGesture();
+    // Typing in a dialog (e.g. the login PIN) must not press Circle on
+    // Backspace or Cross on Enter, nor be blocked by preventDefault().
+    if (isTypingTarget(e.target)) return;
     if (e.code === 'Escape') {
       e.preventDefault();
       this.onMenu();
@@ -354,4 +357,13 @@ export class InputManager {
       /* actuator type unsupported */
     }
   }
+}
+
+/**
+ * True while the user is typing into a form field (e.g. the login PIN dialog).
+ * @param {EventTarget|null} t
+ */
+function isTypingTarget(t) {
+  return t instanceof HTMLElement &&
+    (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 }

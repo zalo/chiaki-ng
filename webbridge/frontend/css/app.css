@@ -158,7 +158,7 @@ kbd {
 .settings-col { display: grid; gap: 12px; align-content: start; }
 .field { display: grid; gap: 5px; font-size: 0.9rem; }
 .field > span { color: var(--text-dim); }
-.field select, .field input[type="text"], .field input[type="number"] {
+.field select, .field input[type="text"], .field input[type="number"], .field input[type="password"] {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line);

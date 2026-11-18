@@ -129,6 +129,11 @@
         <span>PSN Account ID (base64)</span>
         <input id="reg-psn" type="text" placeholder="xxxxxxxxxxx=" autocomplete="off">
       </label>
+      <label class="field">
+        <span>Login PIN (optional: the console user's passcode, sent automatically when asked)</span>
+        <input id="reg-loginpin" type="password" inputmode="numeric" pattern="[0-9]*"
+               maxlength="8" placeholder="0000" autocomplete="off">
+      </label>
       <p id="reg-error" class="form-error"></p>
       <div class="modal-actions">
         <button id="reg-cancel" class="btn">Cancel</button>
@@ -146,9 +151,31 @@
         <input id="pin-input" type="text" inputmode="numeric" pattern="[0-9]*"
                placeholder="0000" autocomplete="off">
       </label>
+      <label id="pin-save-row" class="field field-row">
+        <input id="pin-save" type="checkbox" checked>
+        <span>Remember for this console (sent automatically next time)</span>
+      </label>
       <div class="modal-actions">
         <button id="pin-cancel" class="btn">Cancel</button>
         <button id="pin-submit" class="btn btn-primary">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-loginpin" class="modal">
+    <div class="modal-box">
+      <h2>Login PIN</h2>
+      <p id="lp-msg"></p>
+      <label class="field">
+        <span>PIN</span>
+        <input id="lp-input" type="password" inputmode="numeric" pattern="[0-9]*"
+               maxlength="8" placeholder="0000" autocomplete="off">
+      </label>
+      <p id="lp-error" class="form-error"></p>
+      <div class="modal-actions">
+        <button id="lp-clear" class="btn">Clear</button>
+        <button id="lp-cancel" class="btn">Cancel</button>
+        <button id="lp-save" class="btn btn-primary">Save</button>
       </div>
     </div>
   </div>

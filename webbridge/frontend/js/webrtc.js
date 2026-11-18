@@ -54,6 +54,8 @@ export class RtcSession {
       this._maybeReady();
     };
 
+    /** one-off input messages sent before the input DC opened */
+    this._pendingInput = [];
     this.inputDC = this.pc.createDataChannel('input', {
       negotiated: true,
       id: 2,
@@ -68,7 +70,10 @@ export class RtcSession {
         /* malformed input message — ignore */
       }
     };
-    this.inputDC.onopen = () => this._maybeReady();
+    this.inputDC.onopen = () => {
+      this._flushPendingInput();
+      this._maybeReady();
+    };
 
     // Microphone PCM (browser -> bridge): unordered + lossy, mirrors the
     // bridge's negotiated channel id 4. 48 kHz mono s16le chunks.
@@ -207,12 +212,31 @@ export class RtcSession {
    * @returns {boolean} true if the channel accepted it
    */
   sendInput(msg) {
-    if (this.inputDC.readyState !== 'open') return false;
+    if (this.inputDC.readyState !== 'open') {
+      // Controller state is resent every tick anyway; keep one-off messages
+      // (e.g. a login PIN typed while the connection is still settling).
+      if (msg.t !== 'cs' && this.inputDC.readyState === 'connecting' &&
+          this._pendingInput.length < 16) {
+        this._pendingInput.push(msg);
+        return true;
+      }
+      return false;
+    }
     try {
       this.inputDC.send(JSON.stringify(msg));
       return true;
     } catch (e) {
       return false;
+    }
+  }
+
+  _flushPendingInput() {
+    for (const msg of this._pendingInput.splice(0)) {
+      try {
+        this.inputDC.send(JSON.stringify(msg));
+      } catch (e) {
+        /* channel closed again — drop */
+      }
     }
   }
 
